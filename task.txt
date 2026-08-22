@@ -1,0 +1,7 @@
+Use the ovarian cancer dataset from NUH or Wisconsin Breast Cancer dataset– Divide that into Cancerous and non cancerous 2 class problem using supervised learning.
+• Use any ML technique, eg SVM, ANN – MLP, etc. as a decision tool
+• Determine the best decision boundary which gives the best equal error rate.
+• Plot the ROC curve as you vary the decision boundary.
+• Submit to MSCAI6124@gmail.com
+• As a filename: AI6124_name_assign2.docx and pdf.
+• Deadline: 14th September 2026
