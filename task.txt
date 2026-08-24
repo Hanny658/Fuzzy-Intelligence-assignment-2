@@ -2,4 +2,3 @@ Use the ovarian cancer dataset from NUH or Wisconsin Breast Cancer dataset– Di
 • Use any ML technique, e.g. SVM, ANN – MLP, etc. as a decision tool.
 • Determine the best decision boundary which gives the best equal error rate.
 • Plot the ROC curve as you vary the decision boundary.
-
