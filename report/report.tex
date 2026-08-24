@@ -4,209 +4,141 @@
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{caption}
-\usepackage{subcaption}
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{enumitem}
 \usepackage{microtype}
+\usepackage{placeins}
 \hypersetup{colorlinks=true,linkcolor=blue!60!black,citecolor=blue!60!black,urlcolor=blue!60!black}
 \graphicspath{{../figures/}}
 \setlist{nosep}
 
-\title{AI6124 Assignment 2 \\ \large Cancer vs.\ Non-Cancer Classification with Equal-Error-Rate Decision Boundaries: \\ a Comparison of Back-propagation, Local Learning, Neuro-evolution and Fuzzy Models}
-\author{Hanny (NTU MSAI) | Matric Number: G12345678X}
-\date{\today}
+\title{AI6124 Assignment 2 \\ \large Cancer-versus-Non-Cancer Classification with ROC and Equal-Error-Rate Analysis}
+\author{Hanny | Matric Number: G12345678X}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-I cast cancer diagnosis as a two-class supervised problem on two data sets: the NUH ovarian-cancer blood-assay data of Tan~\emph{et al.}~\cite{tan2008} (28 haemostatic/tumour-marker features, 109 patients) and the Wisconsin Diagnostic Breast Cancer (WDBC) \cite{bcwd} data (30 nuclear-morphology features, 569 patients).
-Eleven decision tools are compared under one protocol: four classical baselines (logistic regression, RBF-SVM, random forest, extreme learning machine); a back-propagation MLP together with 4 alternatives that keep the same 64-32 hidden layout but replace the training rule---a supervised predictive-coding network (Whittington \& Bogacz, 2017), Hinton's Forward-Forward algorithm (2022), and two neuro-evolution optimisers (separable CMA-ES and a real-coded GA); a Takagi--Sugeno ANFIS; and TabPFN~v3, a pre-trained tabular foundation model that classifies by in-context learning, as a reference ceiling.
-For every model the threshold on the continuous decision score is swept to trace the ROC curve---each threshold fixing one decision boundary in feature space---and the threshold is set at the equal error rate (EER), where the false-positive and false-negative rates coincide.
-On WDBC every model reaches an AUC above 0.98 and an EER of 2--7\%, with TabPFN the best, and the non-back-propagation training rules reach the same level as back-propagation. On the small, noisy NUH data the ranking is dominated by sampling variance; random forest and TabPFN have the best cross-validated EER ($\approx0.25$), and the Forward-Forward and neuro-evolved networks are at least as good as the back-propagated MLP, while ANFIS over-fits. The EER threshold is reported together with the operating point obtained when it is fixed on training data only; a cost-weighted threshold that penalises missed cancers is discussed separately.
+This report evaluates supervised cancer screening on the NUH ovarian blood-assay data, with the Wisconsin Diagnostic Breast Cancer (WDBC) data as a lower-variance check. Eight representative classifiers are compared using test receiver operating characteristic (ROC) curves and repeated cross-validation. The main NUH target treats borderline tumours as screening-positive together with invasive cancers, because a false negative is the less acceptable error in this screening context; this convention is tested explicitly rather than presented as an unambiguous pathological label. Selecting on training out-of-fold (OOF) scores alone, random forest is chosen (OOF AUC $0.812$, OOF equal error rate (EER) $0.236$); its OOF threshold of $0.484$ then yields test FPR/FNR of $0.214/0.231$ on the untouched test split. A pooled repeated cross-validation over all cases, reported separately as a stability summary rather than a held-out estimate, ranks the same model first (AUC $0.845$, EER $0.245$). Reassigning or excluding borderline cases changes the random-forest CV EER to approximately $0.20$, demonstrating material label-policy sensitivity. WDBC results are near saturation (test AUC $0.977$--$0.997$), confirming the implementation on a well-conditioned data set.
 \end{abstract}
 
-\section{Problem definition}
-The task (\texttt{from Lecture 6}) is to build a supervised decision tool that separates \emph{cancerous} from \emph{non-cancerous} cases, to determine the decision boundary that yields the best equal error rate, and to plot the ROC curve obtained by varying that boundary.
-Every model studied here therefore outputs a continuous score $s(\mathbf{x})\in\mathbb{R}$ (a logit, an SVM margin, a probability, a goodness difference, \dots), and the decision rule is $\hat y = \mathbb{1}[s(\mathbf{x})\ge\theta]$.
-Two terms are kept distinct throughout: the \emph{decision threshold} $\theta$ is the scalar cut on the score, and the \emph{decision boundary} is the level set $\{\mathbf{x}: s(\mathbf{x})=\theta\}$ it induces in feature space. The model fixes the family of boundaries; $\theta$ selects one member of that family, so ``varying the decision boundary'' is realised by sweeping $\theta$.
-Sweeping $\theta$ from $+\infty$ to $-\infty$ traces the ROC curve $(\mathrm{FPR}(\theta),\mathrm{TPR}(\theta))$.
-The EER is the point where $\mathrm{FPR}(\theta)=\mathrm{FNR}(\theta)=1-\mathrm{TPR}(\theta)$, i.e.\ the intersection of the ROC curve with the anti-diagonal; I obtain it by linear interpolation between the two adjacent ROC vertices and record the corresponding threshold $\theta_{\mathrm{EER}}$, which defines the equal-error decision boundary of that model.
+\section{Task and decision criterion}
+The task is to learn a binary supervised decision tool, determine the boundary that best balances false positives and false negatives, and plot the ROC curve obtained by varying that boundary. Each model returns a score $s(\mathbf{x})$ and predicts the positive class when $s(\mathbf{x})\ge\theta$. The scalar \emph{threshold} $\theta$ induces the feature-space \emph{decision boundary} $\{\mathbf{x}:s(\mathbf{x})=\theta\}$.
+
+Sweeping $\theta$ traces the ROC curve, with false-positive rate $\mathrm{FPR}(\theta)$ and true-positive rate $\mathrm{TPR}(\theta)$. The false-negative rate is $\mathrm{FNR}=1-\mathrm{TPR}$, and the equal error rate is the intersection with $\mathrm{FPR}=\mathrm{FNR}$. Area under the ROC curve (AUC) measures ranking performance independently of a single threshold.
+
+An empirical ROC curve is stepwise. I report an interpolated EER, marked by an asterisk in the tables, but do not imply that its exact intersection is always attainable by one deterministic threshold. The deployable threshold is selected separately from training out-of-fold (OOF) scores as the empirical ROC threshold that minimises $|\mathrm{FPR}-\mathrm{FNR}|$, using the lower balanced error as a tie-breaker. Test-set EERs are descriptive only and are not used for model or threshold selection.
 
 \section{Data}
-\subsection{NUH ovarian-cancer blood assays}
-The data accompany the CLFNN/FALCON-AART paper of Tan, Quek, Ng and Razvi~\cite{tan2008}. Patients diagnosed at the NUH Department of Oncology and Gynaecology on the basis of 30 blood tests (age, haemostatic panel, CA-125, CASA, \dots; Table~3 of~\cite{tan2008}).
-The files provided dataset are not documented, so I reverse-engineered and verified the structure as:
-\begin{itemize}
-  \item Each \texttt{*Train.txt} starts with a header line ``$N$ 1''; \texttt{*Test.txt} has none. Rows are tab-separated feature values followed by a 0/1 label.
-  \item Within a group (\texttt{g1}: 30 features, 35 patients; \texttt{g2}: 28 features, 109 patients) the files \texttt{c1\,\dots\,cN} contain the \emph{same} patients with different labels: every patient is positive in exactly one file. They are one-vs-rest labellings of the clinical sub-groups of~\cite{tan2008}, not cross-validation folds. For \texttt{g2}, after the de-duplication described next: c1 = borderline (5), c2 = benign/normal (56), c3 = stage I--II (14), c4 = stage III--IV (34), i.e.\ 109 patients.
-  \item \texttt{g2c1Test.txt} contains three rows (all borderline) that duplicate training rows; they were removed to avoid leakage.
-  \item The column order of \texttt{g2} does not follow Table~3 of the paper, so features are referred to as $f_1,\dots,f_{28}$.
-\end{itemize}
-I use group \texttt{g2} (the largest) and, following~\cite{tan2008}, define \textbf{cancer = borderline $\cup$ stage I--II $\cup$ stage III--IV} and \textbf{non-cancer = benign/normal}, giving a balanced problem: 55 training patients (27 cancer) and 54 test patients (26 cancer).
-Three assays ($f_{23}$, $f_{24}$, $f_{28}$) are strongly right-skewed (maximum/median ratio above 20; $f_{24}$ reaches $4.86\times10^5$, a range consistent with the tPA-antigen assay of~\cite{tan2008}); these columns are $\log(1+x)$-transformed before standardisation.
+\subsection{NUH ovarian blood assays}
+The NUH data accompany the ovarian-cancer study of Tan \emph{et al.}~\cite{tan2008}. The supplied group \texttt{g2} files contain 28 blood-assay features. Inspection shows that \texttt{c1}--\texttt{c4} are one-vs-rest labels of the same patients rather than cross-validation folds: borderline, benign/normal, Stage I--II, and Stage III--IV, respectively. Three borderline test rows duplicate training rows and are removed, leaving 55 training cases and 54 test cases. Across the retained data there are 5 borderline, 56 benign/normal, 14 Stage I--II, and 34 Stage III--IV cases.
+
+The main screening target is \textbf{positive = borderline $\cup$ Stage I--IV} and \textbf{negative = benign/normal}, giving 53 positive and 56 negative cases. Borderline ovarian tumours are not synonymous with invasive malignancy; grouping them with the positive class is a conservative screening decision intended to avoid a potentially consequential false negative. Section~\ref{sec:borderline} reports how the results change when borderline cases are excluded or assigned to the negative class.
+
+Feature identities cannot be mapped reliably because the file column order does not match the source paper; they are therefore denoted $f_1,\ldots,f_{28}$. On the training set, $f_{23}$, $f_{24}$ and $f_{28}$ have maximum-to-median ratios above 20. These columns are transformed by $\log(1+x)$ before standardisation; the transformation and scaler are fitted inside each training fold.
 
 \subsection{Wisconsin Diagnostic Breast Cancer}
-WDBC contains 569 fine-needle aspirates with 30 real-valued features (mean, standard error and ``worst'' value of ten nuclear measurements); 212 are cancerous and 357 benign. A stratified 80/20 split (seed 0) gives 455 training and 114 test cases. 
-WDBC is nearly linearly separable and serves as a low-variance sanity check for the method comparison, whereas NUH is considered as the small, noisy clinical real problem.
+WDBC contains 569 fine-needle aspirates with 30 nuclear-morphology features, comprising 212 malignant and 357 benign cases~\cite{bcwd,wdbc}. A stratified 80/20 split with seed 0 gives 455 training cases and 114 test cases. The data are close to linearly separable and are used as a sanity check rather than a second clinical claim.
 
-\section{Methods}
-All models consume the same standardised feature vector and generate a scalar score. Hyper-parameters were fixed to a prior (or chosen by an inner cross-validation inside the training fold for the SVM) and are identical on both data sets; no test data were used for any choice.
+\section{Models}
+Eleven models were implemented and run under the identical protocol; the eight reported here are a representative subset spanning the linear, kernel, ensemble, neural, fuzzy, and pre-trained families. The three omitted models (an extreme learning machine, a predictive-coding network, and a GA-trained MLP) are retained in the accompanying code and result files, and including them does not change the selected model on either data set.
 
-\subsection{Classical baselines}
-\textbf{Logistic regression} ($L_2$, $C=1$) provides a linear boundary. \textbf{SVM} (Support Vector Machine with RBF kernel) selects $C\in\{0.1,1,10,100\}$ and $\gamma\in\{\text{scale},0.01,0.1\}$ by inner 5-fold AUC; the signed margin is the score. \textbf{Random forest} (500 trees) scores by the fraction of trees voting ``cancer''. The \textbf{ELM} (extreme learning machine) uses 200 random $\tanh$ hidden units and a ridge-regression read-out ($\lambda=1$) fitted in closed form---a single-shot network that needs no iterative training at all.
+Logistic regression ($L_2$, $C=1$), an RBF-SVM, and a 500-tree random forest provide linear, kernel, and ensemble baselines. The SVM selects $C\in\{0.1,1,10,100\}$ and $\gamma\in\{\text{scale},0.01,0.1\}$ by inner five-fold AUC.
 
-\subsection{Back-propagation MLP (reference)}
-A $d$-64-32-1 network with $\tanh$ hidden units trained for 300 full-batch epochs with Adam (learning rate $10^{-3}$, weight decay $10^{-3}$) on the binary cross-entropy. The same architecture is reused by the predictive-coding and neuro-evolution variants below, and the same 64-32 hidden layout by Forward-Forward (which necessarily differs in its input and read-out), so that differences are mainly attributable to the learning rule.
+A $d$-64-32-1 multilayer perceptron (MLP) with $\tanh$ hidden units is trained for 300 full-batch epochs using Adam (learning rate $10^{-3}$, weight decay $10^{-3}$). Two alternatives retain comparable hidden widths while changing the learning mechanism: Forward-Forward uses label-embedded positive and negative examples with layer-local goodness objectives~\cite{ff2022}, whereas separable CMA-ES optimises the MLP parameters without gradients (population 32, 300 generations)~\cite{hansen}. These methods are retained as compact course-relevant comparisons; no statistical non-inferiority claim is made from their point estimates.
 
-\subsection{Supervised predictive coding (Whittington \& Bogacz, 2017)}
-Each layer $l$ carries value nodes $\mathbf{x}^l$ and error nodes $\boldsymbol\epsilon^l=\mathbf{x}^l-\boldsymbol\mu^l$ with the top-down prediction $\boldsymbol\mu^l=W^l f(\mathbf{x}^{l-1})+\mathbf{b}^l$. The network minimises the free energy $F=\tfrac12\sum_l\|\boldsymbol\epsilon^l\|^2$ in two phases. With the input and the target clamped, the hidden value nodes relax for $T=20$ steps,
-\begin{equation}
-  \mathbf{x}^l \leftarrow \mathbf{x}^l + \gamma\big(-\boldsymbol\epsilon^l + f'(\mathbf{x}^l)\odot (W^{l+1})^{\!\top}\boldsymbol\epsilon^{l+1}\big),\qquad \gamma=0.1,
-\end{equation}
-after which every synapse is updated with a purely local, Hebbian-like rule
-\begin{equation}
-  \Delta W^l = \eta\,\boldsymbol\epsilon^l f(\mathbf{x}^{l-1})^{\!\top},\qquad \Delta\mathbf{b}^l=\eta\,\boldsymbol\epsilon^l ,
-\end{equation}
-that only involves the error at the post-synaptic layer and the activity at the pre-synaptic layer. No gradient is ever propagated backwards through the network (our implementation uses no automatic differentiation); Adam-style re-scaling of the local updates and 300 epochs of mini-batches of 128 give the same epoch budget as BP (on NUH, with 55 training patients, this is also full-batch; on WDBC it is four updates per epoch against one for the full-batch BP run). At test time the output node is left free and the score is the feed-forward prediction $\mu^L$.
+The fuzzy model is a four-rule first-order Takagi--Sugeno ANFIS with Gaussian membership functions and scatter-partition initialisation~\cite{jang1993}. TabPFN v3 (package version 8.4.0)~\cite{tabpfnv3} is included as a strong pre-trained tabular reference; it performs in-context prediction without task-specific gradient training, following the prior-fitted-network formulation introduced by Hollmann \emph{et al.}~\cite{tabpfn}. It should not be interpreted as a performance ceiling, and its licence-gated checkpoint is less reproducible than the locally trained models.
 
-You might know a more recent work in NatComm 2025 - Predictive Coding Light~\cite{pcl2025}, that is an \emph{unsupervised spiking} network for \emph{event-camera} streams, which does not fit to our problem definition.
+\section{Evaluation protocol}
+Every decision is made on training data, and the test split is used once, only to report. Concretely, for the given NUH and WDBC splits, preprocessing is fitted on training data only, and five-fold CV \emph{within the training set} produces OOF scores. Both the choice of model and the choice of threshold are made from those training-OOF scores. The model is then refitted on the complete training set and evaluated once on the test set; the test AUC, interpolated test EER, and the operating point of the selected model are reported afterwards and feed back into nothing.
 
-\subsection{Forward-Forward (Hinton, 2022)}
-The label is embedded in the input by appending a scaled one-hot vector. A \emph{positive} example is $(\mathbf{x},y)$ and a \emph{negative} example is $(\mathbf{x},1-y)$. Each layer is trained on its own objective, with goodness $g=\mathrm{mean}(\mathbf{h}^2)$ of its ReLU activities,
-\begin{equation}
-  \mathcal{L}_l = \mathrm{softplus}\big(-(g_{\mathrm{pos}}-\vartheta)\big)+\mathrm{softplus}\big(g_{\mathrm{neg}}-\vartheta\big),\qquad \vartheta=2,
-\end{equation}
-and passes its length-normalised, \emph{detached} output to the next layer, so no error signal crosses a layer boundary. Two forward passes replace the forward/backward pair of BP. At test time the score is $\sum_l g_l(\mathbf{x},y{=}1)-g_l(\mathbf{x},y{=}0)$.
+A separate, purely descriptive summary is also reported. A 54-case test split makes any single estimate volatile, so all cases are additionally evaluated by $5\times$ repeated stratified five-fold CV (25 fits per model), with the preprocessing refitted inside each fold. These pooled CV columns are computed over the whole cohort and therefore \emph{include the test cases}; they are a resampling summary of how stable a model is across partitions of the available data, not a held-out estimate, and they are not used to select the model, the threshold, or the label policy. Where the pooled ranking is quoted below it is descriptive only, and the selection it would imply is stated separately.
 
-\subsection{Neuro-evolution of the same MLP}
-The 64-32 MLP weights (3\,969 parameters for $d=28$) are optimised without gradients. The fitness of an individual is the training cross-entropy plus a small $L_2$ penalty; a whole population is evaluated with one batched forward pass.
-\textbf{CMA-ES} uses the separable (diagonal-covariance) variant, population 32, $\sigma_0=0.3$, 300 generations.
-The \textbf{GA} is real-coded: population 60, tournament selection ($k=3$), BLX-$\alpha$ crossover ($\alpha=0.5$, $p_c=0.9$), Gaussian mutation ($p_m=0.05$, $\sigma=0.1$), elitism of 2, 300 generations.
-
-\subsection{ANFIS}
-A first-order Takagi--Sugeno system with $R=4$ rules, ``IF $x_1$ is $A_{r1}$ AND \dots AND $x_d$ is $A_{rd}$ THEN $y_r=\mathbf{a}_r^{\!\top}\mathbf{x}+b_r$''. Gaussian membership functions are combined with the product t-norm (in log space to avoid underflow over 28 antecedents); rule centres are initialised by $k$-means (a scatter partition, avoiding the $2^d$ grid) with width $\sqrt d$, and all premise and consequent parameters are tuned by gradient descent on the cross-entropy.
-
-\subsection{TabPFN}
-\label{sec:tabpfn}
-TabPFN~\cite{tabpfn} is a transformer pre-trained on millions of synthetic tabular tasks that classifies new data by in-context learning: the training set is passed as context and no gradient step is taken on the data at hand. It is a strong tabular foundation model on small tables and is included as a SOTA reference. I used the v3 classifier checkpoint (2026) shipped with version 8.4.0 of the \texttt{tabpfn} package, with no task-specific hyperparameters tuned.
-
-\section{Experimental Setup}
-\begin{enumerate}
-  \item \textbf{Given split.} The pre-processing pipeline and the model are fitted on the training set only. A stratified 5-fold cross-validation \emph{inside the training set} yields out-of-fold (OOF) scores, on which $\theta_{\mathrm{EER}}$ is chosen. The model is then refitted on the whole training set and scored on the test set. I report the test AUC, the EER of the test ROC (the equal-error operating point of the test data themselves, with its threshold) and the test FPR/FNR/accuracy obtained with the \emph{pre-chosen} $\theta_{\mathrm{EER}}$, which is the honest estimate of deployed performance.
-  \item \textbf{Repeated cross-validation.} Because the NUH test set has only 54 patients (one misclassified patient moves FPR by $\approx0.04$), all 109 patients are also pooled and evaluated with $5\times$ repeated stratified 5-fold CV (25 fits); AUC and EER are reported as mean $\pm$ standard deviation. The same is done on WDBC.
-  \item \textbf{Cost-sensitive threshold (secondary).} In a screening setting a missed cancer (FN) is more serious than a false alarm (FP). The equal-error threshold required by the task treats both equally; as an additional analysis I also set the threshold at the OOF value that minimises $5\cdot\mathrm{FNR}\cdot p + \mathrm{FPR}\cdot(1-p)$ and report the resulting test sensitivity/specificity. This does not affect the main comparison.
-\end{enumerate}
-All experiments use seed 0, run on a single CPU (R7-6800H).
+All experiments use seed 0 on CPU. The reproduced environment is Python 3.13.5, scikit-learn 1.9.0, PyTorch 2.13.0, \texttt{cma} 4.4.4, and TabPFN 8.4.0.
 
 \section{Results}
-\subsection{NUH ovarian-cancer data}
-Table~\ref{tab:nuh} and Figure~\ref{fig:nuh-roc} summarise the NUH results; Figure~\ref{fig:nuh-cv} shows the repeated-CV AUC with its spread. The cross-validated numbers are the ones to rank the models: the test set has only 54 patients, and a model's test AUC can sit up to 0.15 below its CV mean (GA-MLP 0.64 vs.\ $0.79\pm0.06$; MLP-BP 0.64 vs.\ $0.76\pm0.08$) while others land on it (Forward-Forward 0.82 vs.\ $0.81\pm0.08$). By both CV metrics the random forest is first and TabPFN second; the latter is notable because it performs no training and has no hyper-parameter to tune, so its in-context prior alone is competitive with the best tuned model on 87-patient training folds.
+\subsection{NUH main screening analysis}
+Table~\ref{tab:nuh} orders models by the pooled repeated-CV results; Figure~\ref{fig:nuh-roc} shows the test ROC curves. Random forest has the highest pooled CV AUC ($0.845\pm0.066$) and the lowest pooled CV EER ($0.245\pm0.089$), followed by TabPFN on both metrics. As stated in Section~4, these pooled columns include the test cases and are reported to show stability, not to choose a model; the fold-wise spreads are in any case larger than most differences between methods (Figure~\ref{fig:nuh-cv}), so the ordering is descriptive.
 
 \begin{table}[htbp]
-\centering\footnotesize
-\caption{NUH-g2, cancer vs.\ non-cancer. AUC and EER are measured on the 54-patient test set; the $\theta_{\mathrm{EER}}$ column gives the threshold at the test-set EER and, after the slash, the one chosen on training out-of-fold (OOF) scores, both on the model's own score scale (vote fraction or probability for random forest and TabPFN, logit or margin otherwise); FPR/FNR/Acc are obtained on the test set with the OOF threshold; CV columns are $5{\times}5$-fold repeated cross-validation on all 109 patients (mean $\pm$ s.d.). Fit time is for one fit on 55 patients (CPU); for TabPFN it excludes the prediction-time compute (Section~\ref{sec:tabpfn}).}
+\centering\small
+\caption{NUH-g2 main screening label (borderline positive). Test EER$^{*}$ is the interpolated ROC intersection. CV columns are $5\times5$ repeated-CV over all 109 cases (mean $\pm$ fold-wise s.d.); because they pool the training and test cases they are a stability summary, not a held-out estimate, and the model was selected on training-OOF scores instead (Section~4).}
 \label{tab:nuh}
-\setlength{\tabcolsep}{3pt}
-\input{../results/nuh_table.tex}
+\setlength{\tabcolsep}{8pt}
+\input{../results/nuh_focus_table.tex}
 \end{table}
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{nuh_roc_panels.png}
-\caption{NUH-g2 test-set ROC curves obtained by sweeping each model's decision threshold. Dots mark the equal-error-rate point (intersection with the dashed FPR\,=\,FNR line). (a) classical baselines; (b)--(d) MLP-BP (blue, identical in all three panels) against the fuzzy and foundation models, local-learning rules and neuro-evolution.}
+\includegraphics[width=\textwidth]{nuh_roc_focused.png}
+\caption{NUH test ROC curves for the reported model set, one panel per model family. Dots mark linearly interpolated EER points; a dot can lie between two empirical operating points and need not correspond to one deterministic threshold.}
 \label{fig:nuh-roc}
 \end{figure}
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.72\textwidth]{nuh_cv_auc.png}
-\caption{NUH-g2: cross-validated AUC (mean $\pm$ s.d.\ over 25 folds) grouped by model family.}
+\includegraphics[width=0.78\textwidth]{nuh_cv_auc_focused.png}
+\caption{NUH pooled repeated-CV AUC over all 109 cases (mean $\pm$ fold-wise s.d.\ over 25 fits), grouped by model family. The intervals overlap substantially, so the ordering in Table~\ref{tab:nuh} is descriptive rather than evidence of a reliable difference between methods; as in Table~\ref{tab:nuh}, these values pool training and test cases and were not used for selection.}
 \label{fig:nuh-cv}
 \end{figure}
 
-\paragraph{Best decision boundary.} On the NUH test set the lowest EER is $0.231$, reached by random forest ($\theta_{\mathrm{EER}}=0.49$ on the vote fraction) and CMA-ES-MLP ($\theta_{\mathrm{EER}}=0.76$ on the logit); the equal-error boundaries these thresholds define call $\approx77\%$ of cancers and $\approx77\%$ of benign cases correctly. The $\theta_{\mathrm{EER}}$ column of Table~\ref{tab:nuh} lists, for each model, this test-set threshold next to the one chosen on training OOF scores; the two are on the model's own score scale and are close for the well-calibrated models (random forest $0.49$ vs.\ $0.48$, TabPFN $0.47$ vs.\ $0.40$) but far apart for others (CMA-ES-MLP $0.76$ vs.\ $-0.29$ on the logit). When the threshold is fixed beforehand on training OOF scores, the realised test operating points stay close to the anti-diagonal for the well-behaved models (random forest FPR $0.21$ / FNR $0.23$; CMA-ES-MLP $0.25$ / $0.19$; SVM $0.25$ / $0.19$; TabPFN $0.25$ / $0.23$) but drift for the over-fitting ones (MLP-BP FPR $0.43$ / FNR $0.27$; ANFIS $0.46$ / $0.35$), a direct consequence of their OOF scores being poorly calibrated on 44-patient folds.
+\paragraph{Selected decision boundary.}
+Model selection uses the training-OOF scores alone: neither the test set nor the pooled CV columns take part. On the training OOF scores random forest is best on both criteria (AUC $0.812$, EER $0.236$; next best TabPFN, $0.796$ and $0.250$), so it is selected, and its closest attainable training-OOF equal-error threshold is $\theta_{\mathrm{OOF}}=0.484$ on the vote fraction. Applied after refitting, this threshold gives test FPR $0.214$, FNR $0.231$, sensitivity $0.769$, specificity $0.786$, and accuracy $0.778$; the interpolated test EER is $0.231$. CMA-ES-MLP happens to reach the same descriptive test EER, but it was not selected: its training-OOF EER is clearly worse ($0.296$), and the test-set values were not available to the selection step. That the pooled CV ranking in Table~\ref{tab:nuh} also puts random forest first is a consistency check reported after the fact, not the reason for the choice.
 
-\paragraph{Comparison with the source paper.} Table~9 of~\cite{tan2008} reports, on a related split of the same blood-test data, accuracies of 60--79\% (SVM 60\%, MLP 73\%, FALCON-AART 79\%) with sensitivities of 70--100\% and specificities of 33--60\%. Our EER-thresholded accuracies (59--78\%) and the cross-validated EERs of 0.25--0.33 are in the same range, which supports the labelling reconstructed in Section~2.
-
-\subsection{WDBC}
-Table~\ref{tab:wdbc} and Figure~\ref{fig:wdbc-roc} show that WDBC is nearly solved by every model (near saturation): test AUC 0.977--0.997, test EER 0.024--0.071 and cross-validated EER 0.023--0.041. TabPFN is the best on every metric (test AUC $0.997$, test EER $0.024$, i.e.\ one misclassified positive case; CV EER $0.023\pm0.019$), but the runners-up---ELM on the test EER ($0.028$) and SVM, PC-2017 and Forward-Forward on the CV EER (all $0.028$)---differ from it by only one or two patients. At the pre-chosen $\theta_{\mathrm{EER}}$ the realised test sensitivities are 0.90--0.98 and specificities 0.85--0.97.
+\FloatBarrier
+\subsection{Sensitivity to the borderline label}
+\label{sec:borderline}
+The source data distinguish borderline tumours from both benign/normal cases and invasive cancer. I therefore repeat the pooled $5\times5$ CV for SVM, random forest, and MLP under three policies: borderline as screening-positive (main analysis), excluded, and assigned to non-cancer. This comparison is deliberately run on the pooled cohort, because the question is how the \emph{target definition} changes the achievable error rate rather than how one fitted model generalises; for the same reason the numbers below are not held-out estimates and none of them was used to choose the reported model or its threshold.
 
 \begin{table}[htbp]
 \centering\footnotesize
-\caption{WDBC, malignant vs.\ benign (114-case test set; $5{\times}5$-fold CV on all 569 cases). Columns as in Table~\ref{tab:nuh}.}
+\caption{NUH borderline-label sensitivity. Counts are retained total cases with cancer/non-cancer counts in parentheses.}
+\label{tab:borderline}
+\setlength{\tabcolsep}{7pt}
+\input{../results/nuh_borderline_table.tex}
+\end{table}
+
+The policy materially changes the point estimates. For random forest, excluding borderline cases changes CV AUC/EER from $0.845/0.245$ to $0.882/0.195$; assigning them to non-cancer gives $0.885/0.196$. SVM EER changes from $0.282$ to $0.250$ or $0.243$, while MLP changes from $0.286$ to $0.282$ or $0.256$. These differences are consistent with borderline cases being difficult to distinguish from benign cases~\cite{tan2008}, but the fold-wise spreads overlap and the sample contains only five borderline patients. The experiment demonstrates sensitivity to the target definition; it does not establish that labelling borderline cases as non-cancer is clinically preferable. The main screening-positive policy is retained because it is the more conservative choice when false negatives are considered more serious.
+
+\FloatBarrier
+\subsection{WDBC sanity check}
+All reported models perform strongly on WDBC (Table~\ref{tab:wdbc}): test AUC ranges from $0.977$ to $0.997$, rather than being strictly above $0.98$ for every model. TabPFN has the best test AUC ($0.997$), interpolated test EER ($0.024$), pooled CV AUC ($0.997\pm0.004$), and pooled CV EER ($0.023\pm0.019$). WDBC is used only as an implementation check, so no model is selected on it and these figures are reported descriptively; the near-saturated results confirm that the ROC/EER pipeline behaves as expected on a larger, well-conditioned data set.
+
+\begin{table}[htbp]
+\centering\small
+\caption{WDBC results. Definitions are the same as in Table~\ref{tab:nuh}.}
 \label{tab:wdbc}
-\setlength{\tabcolsep}{3pt}
-\input{../results/wdbc_table.tex}
+\setlength{\tabcolsep}{8pt}
+\input{../results/wdbc_focus_table.tex}
 \end{table}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{wdbc_roc_panels.png}
-\caption{WDBC test-set ROC curves and EER points (same layout as Figure~\ref{fig:nuh-roc}).}
-\label{fig:wdbc-roc}
-\end{figure}
-
-\subsection{Back-propagation versus local learning and neuro-evolution}
-PC-2017, CMA-ES and the GA train exactly the MLP-BP architecture ($d$-64-32-1, $\tanh$), and Forward-Forward keeps the same 64-32 hidden widths but differs in detail (ReLU units, a label-augmented input and a goodness read-out instead of an output layer), so the comparison in Table~\ref{tab:paradigm} and Figure~\ref{fig:curves} largely, though not perfectly, isolates the learning rule.
-
-\begin{table}[htbp]
-\centering\footnotesize
-\caption{Networks with the same 64-32 hidden layout trained by different rules: cross-validated AUC/EER (mean $\pm$ s.d.) and fit time per model on the full training set.}
-\label{tab:paradigm}
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{lcccccc}
-\toprule
- & \multicolumn{2}{c}{NUH-g2} & \multicolumn{2}{c}{WDBC} & \multicolumn{2}{c}{Fit time (s)} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
-Training rule & CV AUC & CV EER & CV AUC & CV EER & NUH & WDBC \\
-\midrule
-Back-propagation (Adam)          & $0.764\pm0.083$ & $0.286\pm0.074$ & $0.995\pm0.006$ & $0.032\pm0.019$ & 0.6 & 0.7 \\
-Predictive coding (local Hebbian)& $0.756\pm0.097$ & $0.294\pm0.078$ & $0.992\pm0.011$ & $0.028\pm0.018$ & 3.0 & 13.5 \\
-Forward-Forward (layer-local)    & $0.813\pm0.082$ & $0.272\pm0.090$ & $0.994\pm0.008$ & $0.028\pm0.017$ & 1.3 & 3.0 \\
-sep-CMA-ES (gradient-free)       & $0.801\pm0.073$ & $0.269\pm0.063$ & $0.994\pm0.008$ & $0.032\pm0.020$ & 5.2 & 12.7 \\
-Real-coded GA (gradient-free)    & $0.785\pm0.058$ & $0.271\pm0.071$ & $0.992\pm0.008$ & $0.037\pm0.019$ & 10.1 & 22.9 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.48\textwidth]{nuh_training_curves.png}\hfill
-\includegraphics[width=0.48\textwidth]{wdbc_training_curves.png}
-\caption{Convergence of the three gradient-style paradigms on the full training set (each curve normalised by its own initial objective: BCE for BP, output-layer squared prediction error for PC, summed layer-wise FF losses for Forward-Forward). The FF objective plateaus well above zero by construction---it is a margin loss on goodness, not a likelihood---yet its classifier is the best of the three on NUH.}
-\label{fig:curves}
-\end{figure}
-
-On WDBC the five rules are practically tied (CV EER 0.028--0.037, differences well inside one standard deviation); the non-BP rules therefore reach the same level as BP on a well-conditioned problem. On NUH the ordering is Forward-Forward $\approx$ CMA-ES $>$ GA $>$ BP $\approx$ PC, but the spread ($\pm0.06$--$0.09$) is larger than any gap, so the defensible statement is that no alternative appears worse than back-propagation at this sample size. Two mechanisms plausibly explain the small advantage of FF and the evolutionary optimisers on 44-patient folds: FF's contrastive goodness objective with length normalisation is a strong implicit regulariser (its training loss never reaches zero, Figure~\ref{fig:curves}), and CMA-ES/GA with an $L_2$ fitness term explore a much smaller effective hypothesis space than Adam, which drives the BP network to a training cross-entropy of $\approx0.005$ and the PC network to a vanishing output prediction error (memorisation of 55 patients). Compute cost is the price: PC needs $T{=}20$ relaxation steps per batch (20$\times$ the forward passes of BP) and the evolutionary methods need $10^4$ fitness evaluations; on these data sizes that is still seconds.
 
 \section{Discussion}
-\paragraph{Choosing the threshold: EER versus cost.} The equal-error threshold answers the task as posed and is a convenient reference point for comparing models, because it does not depend on prevalence or on a cost assumption. Clinically, however, a missed cancer is more serious than a false alarm. Our secondary analysis moves the threshold to the OOF point minimising $5\cdot\mathrm{FNR}\cdot p+\mathrm{FPR}\cdot(1-p)$. On WDBC this barely changes the operating point (sensitivity 0.90--0.98, specificity 0.83--0.97) because the ROC curve is almost a right angle. On NUH, with AUC $\approx0.8$, a 5:1 cost ratio pushes the models to sensitivity 0.81--1.00 at specificity 0.00--0.25: eight of the eleven models (TabPFN included) end at sensitivity $\ge0.88$ with specificity $\le0.11$, i.e.\ close to ``refer everyone'', and the other three (ELM, MLP-BP, CMA-ES-MLP) retain a specificity of only 0.14--0.25 at sensitivity 0.81--0.89. This is not a failure of the models but a property of the ROC shape: at this discriminative power a strongly asymmetric cost cannot be satisfied without giving up specificity. In practice the decision should be presented to the clinician as the full ROC curve (Figure~\ref{fig:nuh-roc}) with the EER point as the neutral default and a cost-weighted point chosen with realistic prevalence and cost figures.
+The assignment requirements are met directly: the classifiers return continuous scores, the ROC curves are obtained by sweeping the threshold, and the selected random-forest boundary is determined from training OOF data. Separating the interpolated EER from the attainable threshold avoids claiming an exact FPR--FNR equality that a finite test set cannot necessarily realise.
 
-\paragraph{Small-sample effects.} The NUH experiments are a case study in variance. The inner grid search of the SVM on 44-patient folds produced an OOF AUC of only 0.54 while the refitted model scored 0.81 on the test set; the MLP-BP and GA-MLP drove their training loss below $0.01$ and have the lowest test AUCs ($0.64$); the 25-fold CV standard deviations ($0.06$--$0.12$ in AUC) exceed all differences between models. Any claim that one method ``wins'' on NUH should be read in that light; the robust findings are that (i) tree ensembles and kernel methods are competitive with every neural variant, (ii) the non-BP training rules are not inferior to BP, (iii) a pre-trained tabular foundation model with nothing to tune (TabPFN) is within one standard deviation of the best model on both CV metrics, and (iv) heavy-tailed assays should be log-transformed (without it the standardised $f_{24}$ column is dominated by one patient).
+The NUH results are dominated by small-sample uncertainty and label definition. The training-OOF comparison supports random forest as the preferred choice among the tested models under the stated protocol, and the pooled repeated CV agrees; neither shows that alternative learning rules are equivalent or non-inferior, and the pooled figures cannot be read as out-of-sample performance because they include the test cases. Forward-Forward and CMA-ES have competitive point estimates, while ANFIS is more variable; stronger claims would require paired statistical analysis across repeated splits and a larger external cohort.
 
-\paragraph{Interpretability.} ANFIS was included for its interpretability (explicit fuzzy rules), the theme of~\cite{tan2008}; TabPFN sits at the opposite end of that spectrum, a 213\,MB black box. On NUH ANFIS over-fits with the fixed hyper-parameters; with only 4 rules it is essentially a gated mixture of four linear models, and its poor OOF calibration (FPR 0.46 at $\theta_{\mathrm{EER}}$) shows that the rule firing strengths do not transfer between folds. Stronger regularisation or feature selection (Table~11 of~\cite{tan2008} reports large gains from a 10-feature subset) would be the first improvement.
+The EER objective gives false positives and false negatives equal weight, as required by the task. A clinical screening threshold would normally favour sensitivity and must be chosen using explicit costs, prevalence, and clinical validation. Treating borderline cases as screening-positive addresses the label side of that concern but does not replace cost-sensitive threshold selection.
 
-\paragraph{Limitations.} Hyper-parameters were fixed a prior and shared across data sets rather than tuned per model, which favours methods that are robust by default (random forest, FF, CMA-ES) over those that are sensitive (ANFIS, PC learning rates). TabPFN was run with its default v3 checkpoint and ensemble settings; it is by far the largest and least transparent of the tools, its licence-gated weights limit reproducibility, and its tabulated fit time excludes the prediction-time compute. Only group \texttt{g2} of the NUH data was used; \texttt{g1} (35 patients, all 30 assays) is too small to evaluate.
+Limitations include the five borderline cases, the reverse-engineered NUH file structure, fixed hyperparameters for most models, and reliance on one local version stack. TabPFN additionally requires licensed weights. Exact dependency versions and data checksums should be retained with the submitted code because an unpinned package list alone is insufficient for long-term reproduction.
 
 \section{Conclusion}
-Eleven decision tools were evaluated under one protocol that sweeps the decision threshold to obtain the ROC curve and sets it at the equal error rate. On WDBC every model attains AUC $\ge0.98$ and an EER of 2--7\%, with the pre-trained TabPFN best (test EER $0.024$). On the NUH ovarian-cancer blood tests the best cross-validated tool is the random forest (AUC $0.845$, EER $0.245$), closely followed by TabPFN (AUC $0.828$, EER $0.255$) without any training on the data, and the best test-set EER ($0.231$) is shared by random forest and the CMA-ES-trained MLP, corresponding to about 77\% sensitivity at 77\% specificity. The central methodological result is that replacing back-propagation by predictive coding, by the Forward-Forward algorithm or by neuro-evolution of a network of the same size does not measurably reduce discrimination on either data set and, on the small NUH data, the Forward-Forward and CMA-ES variants are the most robust of the neural models. The cost-weighted threshold analysis shows that, at the discriminative power available from blood assays alone, prioritising sensitivity sacrifices most of the specificity, so the ROC curve itself---not a single operating point---is the deliverable a clinician should see.
+Random forest is the preferred decision tool for the main NUH screening definition. It was selected on training-OOF scores alone (OOF AUC $0.812$, OOF EER $0.236$), and its training-OOF vote threshold of $0.484$ yields $0.769$ sensitivity and $0.786$ specificity on the test split, which was held out from both the model choice and the threshold choice. The pooled repeated CV, which ranks the same model first (AUC $0.845$, EER $0.245$), is reported only as a stability check and is not an out-of-sample estimate. The ROC analysis satisfies the requested decision-boundary sweep, while the WDBC results provide a successful implementation check. Most importantly, the borderline sensitivity experiment shows that NUH performance estimates depend materially on whether five clinically ambiguous cases are treated as positive, excluded, or treated as negative. The reported result is therefore conditional on the explicitly stated conservative screening label.
 
 \section{AI Usage Disclosure}
-AI tools were used for language polishing and limited coding assistance. All experimental design, implementation choices, result interpretation, and technical content were reviewed and verified by the author.
+This assignment was written by the student, with the assistance of AI tools (ChatGPT and Claude) for grammar, style checking and code generation. The student has verified that all content is original and that any AI-generated suggestions have been critically evaluated and appropriately integrated.
 
+\begingroup\small
 \begin{thebibliography}{9}
 \bibitem{tan2008} T.~Z. Tan, C. Quek, G. S. Ng, K. Razvi. Ovarian cancer diagnosis with complementary learning fuzzy neural network. \emph{Artificial Intelligence in Medicine} 43:207--222, 2008.
-\bibitem{bcwd} Wolberg, W., Mangasarian, O., Street, N., \& Street, W. (1993). Breast Cancer Wisconsin (Diagnostic) [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5DW2B
-\bibitem{wb2017} J. C. R. Whittington, R. Bogacz. An approximation of the error backpropagation algorithm in a predictive coding network with local Hebbian synaptic plasticity. \emph{Neural Computation} 29(5):1229--1262, 2017.
+\bibitem{bcwd} W. Wolberg, O. Mangasarian, N. Street, W. Street. Breast Cancer Wisconsin (Diagnostic) [Dataset]. UCI Machine Learning Repository, 1993. \url{https://doi.org/10.24432/C5DW2B}.
+\bibitem{wdbc} W. N. Street, W. H. Wolberg, O. L. Mangasarian. Nuclear feature extraction for breast tumor diagnosis. \emph{IS\&T/SPIE}, 1993.
 \bibitem{ff2022} G. Hinton. The Forward-Forward algorithm: some preliminary investigations. arXiv:2212.13345, 2022.
 \bibitem{hansen} N. Hansen. The CMA evolution strategy: a tutorial. arXiv:1604.00772, 2016.
-\bibitem{jang1993} J.-S. R. Jang. ANFIS: adaptive-network-based fuzzy inference system. \emph{IEEE Trans. SMC} 23(3):665--685, 1993.
-\bibitem{elm} G.-B. Huang, Q.-Y. Zhu, C.-K. Siew. Extreme learning machine: theory and applications. \emph{Neurocomputing} 70:489--501, 2006.
+\bibitem{jang1993} J.-S. R. Jang. ANFIS: adaptive-network-based fuzzy inference system. \emph{IEEE Transactions on Systems, Man, and Cybernetics} 23(3):665--685, 1993.
 \bibitem{tabpfn} N. Hollmann \emph{et al.} Accurate predictions on small data with a tabular foundation model. \emph{Nature} 637:319--326, 2025.
-\bibitem{pcl2025} A. W. N'dri, T. Barbier, C. Teuli\`ere, J. Triesch. Predictive Coding Light. \emph{Nature Communications}, 2025. doi:10.1038/s41467-025-64234-z.
-\bibitem{wdbc} W. N. Street, W. H. Wolberg, O. L. Mangasarian. Nuclear feature extraction for breast tumor diagnosis. \emph{IS\&T/SPIE}, 1993.
+\bibitem{tabpfnv3} L. Grinsztajn \emph{et al.} TabPFN-3: technical report. arXiv:2605.13986, 2026.
 \end{thebibliography}
+\endgroup
 
 \end{document}

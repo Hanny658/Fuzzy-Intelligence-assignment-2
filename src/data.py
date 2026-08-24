@@ -68,7 +68,12 @@ def _heavy_tail_cols(X: np.ndarray, ratio: float = 20.0) -> list:
 
 
 def load_nuh_g2(cancer_groups=(1, 3, 4), noncancer_groups=(2,)) -> Dataset:
-    """Build cancer-vs-non-cancer labels from the one-vs-rest files of group g2."""
+    """Build a binary NUH-g2 dataset from selected one-vs-rest subgroups.
+
+    Groups not listed in either argument are excluded.  This makes the clinically
+    ambiguous borderline group (c1) explicit: it can be treated as cancer (the
+    historical default), excluded, or treated as non-cancer in sensitivity analyses.
+    """
     train_parts = {c: _read_nuh(os.path.join(NUH_DIR, f"g2c{c}Train.txt")) for c in range(1, 5)}
     test_parts = {c: _read_nuh(os.path.join(NUH_DIR, f"g2c{c}Test.txt")) for c in range(1, 5)}
 
@@ -84,6 +89,8 @@ def load_nuh_g2(cancer_groups=(1, 3, 4), noncancer_groups=(2,)) -> Dataset:
         keys = list(label_of)
         X = np.array(keys, dtype=float)
         sub = np.array([label_of[k] for k in keys])
+        selected = np.isin(sub, (*cancer_groups, *noncancer_groups))
+        X, sub = X[selected], sub[selected]
         y = np.where(np.isin(sub, cancer_groups), 1, 0)
         assert set(np.unique(sub)) <= set(cancer_groups) | set(noncancer_groups)
         return X, y

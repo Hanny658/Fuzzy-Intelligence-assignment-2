@@ -18,23 +18,30 @@ class OperatingPoint:
 
 
 def eer(y: np.ndarray, scores: np.ndarray):
-    """Equal error rate and its threshold, by linear interpolation of the ROC where FPR = FNR."""
-    fpr, tpr, thr = roc_curve(y, scores)
+    """Return the interpolated EER and the closest attainable deterministic threshold.
+
+    The EER value is obtained from the linearly interpolated ROC intersection with
+    FPR = FNR.  On a finite sample, that interpolated point generally represents a
+    mixture of two adjacent operating points rather than one score threshold.  The
+    returned threshold is therefore selected separately from the complete empirical
+    ROC: it minimises |FPR - FNR|, with balanced error as the tie-breaker.
+    """
+    fpr, tpr, thr = roc_curve(y, scores, drop_intermediate=False)
     fnr = 1 - tpr
     diff = fpr - fnr  # goes from -1 (at (0,0)) to +1 (at (1,1))
     idx = np.where(np.diff(np.sign(diff)) != 0)[0]
     if len(idx) == 0:  # degenerate: take the closest point
-        i = int(np.argmin(np.abs(diff)))
-        return float((fpr[i] + fnr[i]) / 2), float(thr[i])
-    i = int(idx[0])
-    d0, d1 = diff[i], diff[i + 1]
-    w = d0 / (d0 - d1) if d0 != d1 else 0.0
-    e = fpr[i] + w * (fpr[i + 1] - fpr[i])
-    t0, t1 = thr[i], thr[i + 1]
-    if np.isinf(t0):
-        t0 = t1 + 1e-6
-    t = t0 + w * (t1 - t0)
-    return float(e), float(t)
+        e = float(np.min((fpr + fnr) / 2))
+    else:
+        i = int(idx[0])
+        d0, d1 = diff[i], diff[i + 1]
+        w = d0 / (d0 - d1) if d0 != d1 else 0.0
+        e = float(fpr[i] + w * (fpr[i + 1] - fpr[i]))
+
+    gap = np.abs(diff)
+    candidates = np.flatnonzero(gap == gap.min())
+    j = int(candidates[np.argmin((fpr[candidates] + fnr[candidates]) / 2)])
+    return e, float(thr[j])
 
 
 def operating_point(y: np.ndarray, scores: np.ndarray, threshold: float) -> OperatingPoint:

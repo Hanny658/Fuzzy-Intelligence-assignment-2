@@ -12,8 +12,8 @@ from sklearn.metrics import roc_curve  # noqa: E402
 
 from metrics import eer  # noqa: E402
 
-# fixed categorical order (validated palette); at most 4 series per panel
-SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
+# fixed categorical order (validated palette)
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#8b5cf6", "#d1477a"]
 INK, INK2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
 
 plt.rcParams.update({
@@ -22,13 +22,24 @@ plt.rcParams.update({
     "figure.facecolor": "white", "axes.facecolor": SURFACE, "savefig.dpi": 200,
 })
 
-# Panels of the 2x2 ROC figure: (title, models). MLP-BP is the common reference and keeps slot 1.
-PANELS = [
-    ("(a) Classical baselines", ["LogReg", "SVM-RBF", "RandomForest", "ELM"]),
-    ("(b) Fuzzy and foundation models vs MLP-BP", ["MLP-BP", "ANFIS", "TabPFN"]),
-    ("(c) Local learning vs back-propagation", ["MLP-BP", "PC-2017", "Forward-Forward"]),
-    ("(d) Neuro-evolution vs back-propagation", ["MLP-BP", "CMA-ES-MLP", "GA-MLP"]),
+# ROC panels are derived from the families of the models actually passed in, so the figure cannot go
+# stale when the reported model set changes. The groups mirror the paragraphs of the Models section;
+# every model is drawn exactly once (no model is repeated across panels as a shared reference).
+PANEL_GROUPS = [
+    ("Classical baselines", ("classical",)),
+    ("Neural networks", ("backprop", "local-learning", "neuro-evolution")),
+    ("Fuzzy and pre-trained models", ("fuzzy", "foundation")),
 ]
+
+
+def _panels(results: dict) -> list:
+    """[(labelled title, [Result, ...]), ...] for the groups that contain at least one model."""
+    groups = []
+    for title, families in PANEL_GROUPS:
+        members = [r for r in results.values() if r.family in families]
+        if members:
+            groups.append((title, members))
+    return [(f"({chr(97 + i)}) {t}", m) for i, (t, m) in enumerate(groups)]
 
 
 def _style_axes(ax):
@@ -52,22 +63,22 @@ def _draw_roc(ax, y, scores, color, label):
 
 
 def roc_panels(results: dict, dataset: str, path: str):
-    """results: model name -> Result. Draws the test-set ROC, 2x2 panels by family."""
-    fig, axes = plt.subplots(2, 2, figsize=(8.2, 8.2))
-    for ax, (title, models) in zip(axes.ravel(), PANELS):
-        k = 0
-        for m in models:
-            if m not in results:
-                continue
-            r = results[m]
-            _draw_roc(ax, r.scores["y_test"], r.scores["test_scores"], SERIES[k], m)
-            k += 1
+    """results: model name -> Result. Draws the test-set ROC in one panel per model family."""
+    panels = _panels(results)
+    ncol = min(len(panels), 3)
+    nrow = int(np.ceil(len(panels) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(2.9 * ncol, 3.5 * nrow), squeeze=False)
+    for ax, (title, members) in zip(axes.ravel(), panels):
+        for k, r in enumerate(members):
+            _draw_roc(ax, r.scores["y_test"], r.scores["test_scores"], SERIES[k % len(SERIES)], r.model)
         _style_axes(ax)
         ax.set_title(title, loc="left", fontsize=9.5)
         ax.legend(loc="lower right", fontsize=8)
-    fig.suptitle(f"{dataset}: test-set ROC curves; dots mark the equal-error-rate point (dashed: FPR = FNR)",
-                 fontsize=10, color=INK, x=0.02, ha="left")
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    for ax in axes.ravel()[len(panels):]:
+        ax.axis("off")
+    fig.suptitle(f"{dataset}: test-set ROC curves; dots mark the interpolated equal-error point "
+                 f"(dashed: FPR = FNR)", fontsize=10, color=INK, x=0.02, ha="left")
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
     fig.savefig(path)
     plt.close(fig)
 

@@ -68,7 +68,7 @@ def preprocess(src: str) -> str:
     if body:
         items = re.split(r"\\bibitem\{[^}]+\}", body.group(1))[1:]
         # a leading "{}" keeps pandoc from reading "[n]" as an optional argument of the previous command
-        refs = BS + "section*{References}\n" + "\n".join(f"{{}}[{i + 1}] {it.strip()}\n" for i, it in enumerate(items))
+        refs = BS + "section*{References}\n" + "\n".join(f"{{}}[{i + 1}]~{it.strip()}\n" for i, it in enumerate(items))
         src = src[:body.start()] + refs + src[body.end():]
 
     # pandoc does not number floats in docx: prefix captions with the numbers LaTeX assigns
@@ -105,6 +105,74 @@ def preprocess(src: str) -> str:
     return src
 
 
+def format_docx(path: str) -> None:
+    """Apply the report's A4 layout and a few Word-specific pagination safeguards."""
+    from docx import Document
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Mm, Pt
+
+    doc = Document(path)
+    for section in doc.sections:
+        section.page_width = Mm(210)
+        section.page_height = Mm(297)
+        section.top_margin = Mm(22)
+        section.bottom_margin = Mm(22)
+        section.left_margin = Mm(22)
+        section.right_margin = Mm(22)
+        section.footer_distance = Mm(10)
+
+        footer = section.footer
+        paragraph = footer.paragraphs[0]
+        paragraph.clear()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = paragraph.add_run()
+        begin = OxmlElement("w:fldChar")
+        begin.set(qn("w:fldCharType"), "begin")
+        instruction = OxmlElement("w:instrText")
+        instruction.set(qn("xml:space"), "preserve")
+        instruction.text = " PAGE "
+        end = OxmlElement("w:fldChar")
+        end.set(qn("w:fldCharType"), "end")
+        run._r.extend((begin, instruction, end))
+
+    widths_mm = {
+        0: (42, 26, 28, 35, 35),
+        1: (38, 32, 40, 28, 28),
+        2: (42, 26, 28, 35, 35),
+    }
+    for table_index, table in enumerate(doc.tables):
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table.autofit = False
+        if table.rows:
+            table.rows[0]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
+        column_widths = widths_mm.get(table_index)
+        for row in table.rows:
+            row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+            for column_index, cell in enumerate(row.cells):
+                if column_widths and column_index < len(column_widths):
+                    cell.width = Mm(column_widths[column_index])
+                    tc_width = cell._tc.get_or_add_tcPr().get_or_add_tcW()
+                    tc_width.type = "dxa"
+                    tc_width.w = int(Mm(column_widths[column_index]).twips)
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.size = Pt(10)
+
+    for paragraph in doc.paragraphs:
+        text = paragraph.text.strip()
+        if text.startswith(("Table ", "Figure ")):
+            paragraph.paragraph_format.keep_with_next = True
+        if text.startswith("Table 2:"):
+            paragraph.paragraph_format.page_break_before = True
+        if text == "References":
+            paragraph.paragraph_format.page_break_before = True
+
+    doc.save(path)
+
+
 def main() -> None:
     import pypandoc
 
@@ -118,6 +186,7 @@ def main() -> None:
             "_report_docx.tex", "docx", outputfile="report.docx",
             extra_args=["--resource-path=.;../figures;../results", "--number-sections", "--dpi=200"],
         )
+        format_docx(DOCX)
     finally:
         os.chdir(cwd)
         os.remove(tmp)
