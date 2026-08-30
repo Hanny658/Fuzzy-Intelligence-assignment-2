@@ -31,6 +31,10 @@ PANEL_GROUPS = [
     ("Fuzzy and pre-trained models", ("fuzzy", "foundation")),
 ]
 
+FAMILY_ORDER = ["classical", "backprop", "local-learning", "neuro-evolution", "fuzzy", "foundation"]
+# one hue per data set in the paired dot plot: blue is the primary set, orange-red the added one
+DATASET_COLOUR = {"NUH-g2": SERIES[0], "SUPPORT2": SERIES[1]}
+
 
 def _panels(results: dict) -> list:
     """[(labelled title, [Result, ...]), ...] for the groups that contain at least one model."""
@@ -100,8 +104,8 @@ def roc_single(r, dataset: str, path: str):
 
 def cv_dotplot(results: dict, dataset: str, path: str, metric: str = "auc"):
     """Repeated-CV mean +- std per model, grouped by family, single hue."""
-    order = ["classical", "backprop", "local-learning", "neuro-evolution", "fuzzy", "foundation"]
-    rows = sorted(results.values(), key=lambda r: (order.index(r.family), -getattr(r, f"cv_{metric}_mean")))
+    rows = sorted(results.values(),
+                  key=lambda r: (FAMILY_ORDER.index(r.family), -getattr(r, f"cv_{metric}_mean")))
     fig, ax = plt.subplots(figsize=(6.4, 0.34 * len(rows) + 1.2))
     ys = np.arange(len(rows))[::-1]
     for y0, r in zip(ys, rows):
@@ -127,6 +131,51 @@ def cv_dotplot(results: dict, dataset: str, path: str, metric: str = "auc"):
     plt.close(fig)
 
 
+def cv_dotplot_paired(per_dataset: dict, path: str, metric: str = "auc"):
+    """Two data sets in one dot plot: one row per model, one coloured point per data set.
+
+    per_dataset: {dataset name -> {model name -> Result}}.  Rows are ordered by family and then
+    by the first data set's value, so the two hues are read against a common model axis.
+    """
+    names = list(per_dataset)
+    primary = per_dataset[names[0]]
+    rows = sorted(primary.values(),
+                  key=lambda r: (FAMILY_ORDER.index(r.family), -getattr(r, f"cv_{metric}_mean")))
+    fig, ax = plt.subplots(figsize=(6.6, 0.46 * len(rows) + 1.5))
+    ys = np.arange(len(rows))[::-1]
+    offsets = np.linspace(0.17, -0.17, len(names))
+    for dname, dy in zip(names, offsets):
+        colour = DATASET_COLOUR.get(dname, SERIES[0])
+        for y0, ref in zip(ys, rows):
+            r = per_dataset[dname].get(ref.model)
+            if r is None:
+                continue
+            m, s = getattr(r, f"cv_{metric}_mean"), getattr(r, f"cv_{metric}_std")
+            ax.plot([m - s, m + s], [y0 + dy] * 2, color=colour, linewidth=2, alpha=0.45, zorder=2)
+            ax.scatter([m], [y0 + dy], s=38, color=colour, edgecolor="white", linewidth=1.4, zorder=3)
+            ax.text(m + s + 0.006, y0 + dy, f"{m:.3f}", va="center", fontsize=7.5, color=INK2)
+    ax.set_yticks(ys)
+    ax.set_yticklabels([f"{r.model}  [{r.family}]" for r in rows], fontsize=8.5, color=INK)
+    fams = [r.family for r in rows]
+    for i in range(1, len(fams)):
+        if fams[i] != fams[i - 1]:
+            ax.axhline(ys[i] + 0.5, color=GRID, linewidth=0.8)
+    ax.set_ylim(ys.min() - 0.6, ys.max() + 0.6)
+    ax.set_xlabel(("Cross-validated AUC" if metric == "auc" else "Cross-validated EER") + " (mean +- std over folds)")
+    ax.grid(True, axis="x", color=GRID, linewidth=0.6)
+    for s in ("top", "right", "left"):
+        ax.spines[s].set_visible(False)
+    ax.tick_params(axis="y", length=0)
+    handles = [plt.Line2D([], [], marker="o", linestyle="-", linewidth=2, markersize=7,
+                          color=DATASET_COLOUR.get(d, SERIES[0]), markeredgecolor="white", label=d)
+               for d in names]
+    ax.legend(handles=handles, loc="lower left", bbox_to_anchor=(0, 1.01), ncol=len(names),
+              fontsize=8.5, title="Data set", title_fontsize=8.5, alignment="left")
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def training_curves(hists: dict, dataset: str, path: str):
     """Loss curves for the three training paradigms (normalised to their own first value)."""
     fig, ax = plt.subplots(figsize=(5.2, 3.2))
@@ -140,7 +189,7 @@ def training_curves(hists: dict, dataset: str, path: str):
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
     ax.legend(fontsize=8)
-    ax.set_title(f"{dataset}: convergence of BP, PC and FF (each its own objective)", loc="left", fontsize=9.5)
+    ax.set_title(f"{dataset}: convergence of MLP-BP, MLP-PC and MLP-FF (each its own objective)", loc="left", fontsize=9.5)
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)

@@ -53,6 +53,10 @@ class TabPFN(ScoringModel):
         _load_token_from_env_file()
         os.environ.setdefault("TABPFN_NO_BROWSER", "1")  # never block a headless run on a browser login
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+        # On CPU the package refuses contexts above 5000 rows because inference gets slow. SUPPORT2
+        # has 7284 training rows, so the guard is lifted deliberately: one predict call over the
+        # full context takes ~5 min here, against ~1 s for every other model in the comparison.
+        os.environ.setdefault("TABPFN_ALLOW_CPU_LARGE_DATASET", "1")
         if not os.environ.get("TABPFN_TOKEN") and not os.environ.get("TABPFN_ALLOW_INTERACTIVE"):
             raise RuntimeError("TabPFN weights need a licence token: set TABPFN_TOKEN or TOKEN in .env "
                                "(see https://ux.priorlabs.ai/account) - model skipped")

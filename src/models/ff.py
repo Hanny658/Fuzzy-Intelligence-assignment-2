@@ -42,7 +42,7 @@ class FFLayer(torch.nn.Module):
 
 
 class ForwardForward(ScoringModel):
-    name, family = "Forward-Forward", "local-learning"
+    name, family = "MLP-FF", "local-learning"
 
     def __init__(self, seed=0, epochs=300, lr=3e-3, threshold=2.0, label_scale=3.0, batch_size=128):
         super().__init__(seed)

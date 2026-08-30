@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-HIDDEN = (64, 32)  # common architecture d-64-32-1 for MLP-BP, PC, FF, CMA-ES-MLP, GA-MLP
+HIDDEN = (64, 32)  # common architecture d-64-32-1 for MLP-BP, MLP-PC, MLP-FF, MLP-CMA-ES, MLP-GA
 
 
 def to_t(X) -> torch.Tensor:

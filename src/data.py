@@ -1,9 +1,13 @@
 """Dataset loaders for Assignment 2.
 
-Two datasets:
-  * WDBC  - Wisconsin Diagnostic Breast Cancer (569 x 30), label M=1 (malignant), B=0.
-  * NUH   - NUH ovarian-cancer blood-test data (Tan, Quek, Ng, Razvi 2008), group g2
-            (28 features, 55 train / 54 test after de-duplication).
+Three datasets, chosen to span three difficulty tiers rather than three cancers:
+  * WDBC     - Wisconsin Diagnostic Breast Cancer (569 x 30), label M=1 (malignant), B=0.
+  * NUH      - NUH ovarian-cancer blood-test data (Tan, Quek, Ng, Razvi 2008), group g2
+               (28 features, 55 train / 54 test after de-duplication).
+  * SUPPORT2 - SUPPORT study, in-hospital mortality of seriously ill adults (9105 patients).
+               Added because WDBC is saturated (every model scores AUC ~0.99) and NUH is too
+               small to separate models reliably; SUPPORT2 sits in between, with class
+               imbalance, mixed feature types and real missingness.
 
 NUH file facts (verified by inspection, not documented in the repo):
   * *Train.txt begins with a header line "N 1"; *Test.txt has no header.
@@ -22,6 +26,8 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NUH_DIR = os.path.join(ROOT, "Ovarian-NUH")
 WDBC_PATH = os.path.join(ROOT, "wisconsin_breast_cancer_diagnostic", "wdbc.data")
+SUPPORT2_PATH = os.path.join(ROOT, "support2", "support2.csv")
+SUPPORT2_URL = "https://archive.ics.uci.edu/static/public/880/data.csv"
 
 
 @dataclass
@@ -61,10 +67,16 @@ def _read_nuh(path: str) -> np.ndarray:
 
 
 def _heavy_tail_cols(X: np.ndarray, ratio: float = 20.0) -> list:
-    """Columns whose max/median ratio is large (right-skewed lab values)."""
-    med = np.median(X, axis=0)
-    mx = X.max(axis=0)
-    return [int(j) for j in range(X.shape[1]) if med[j] > 0 and mx[j] / med[j] > ratio]
+    """Columns whose max/median ratio is large (right-skewed lab values).
+
+    NaN-aware, because SUPPORT2 keeps its missing values until the in-fold imputer runs.
+    On the two complete data sets this is identical to the plain median/max version.
+    """
+    with np.errstate(invalid="ignore"):
+        med = np.nanmedian(X, axis=0)
+        mx = np.nanmax(X, axis=0)
+    return [int(j) for j in range(X.shape[1])
+            if np.isfinite(med[j]) and np.isfinite(mx[j]) and med[j] > 0 and mx[j] / med[j] > ratio]
 
 
 def load_nuh_g2(cancer_groups=(1, 3, 4), noncancer_groups=(2,)) -> Dataset:
@@ -123,7 +135,60 @@ def load_wdbc(test_size: float = 0.2, seed: int = 0) -> Dataset:
     return Dataset("WDBC", X_tr, y_tr, X_te, y_te, names, _heavy_tail_cols(X_tr))
 
 
-LOADERS = {"nuh": load_nuh_g2, "wdbc": load_wdbc}
+# ----------------------------------------------------------------------------- SUPPORT2
+# Columns that must not be used as predictors. Two kinds:
+#   identifier  - id
+#   post-hoc    - recorded at or after the outcome, so knowing them presupposes the answer:
+#                 death/d.time (died at any time / time to death), slos (length of stay),
+#                 sfdm2 (functional status at 2 months), charges/totcst/totmcst (billed at
+#                 discharge), dnr/dnrday (resuscitation order set during the stay).
+# dzgroup is dropped as redundant with dzclass (dzclass is its 4-level grouping); adlp/adlsc are
+# dropped as alternative encodings of adls, which is kept. prg2m/prg6m are the attending
+# physician's own survival estimates, which would make the task "copy the clinician".
+SUPPORT2_DROP = ["id", "death", "d.time", "slos", "sfdm2", "charges", "totcst", "totmcst",
+                 "dnr", "dnrday", "prg2m", "prg6m", "dzgroup", "adlp", "adlsc"]
+SUPPORT2_TARGET = "hospdead"
+
+
+def load_support2(test_size: float = 0.2, seed: int = 0) -> Dataset:
+    """SUPPORT2: in-hospital death of seriously ill hospitalised adults (9105 patients).
+
+    Kept predictors are baseline demographics, comorbidity and physiology recorded on study
+    entry, including the SUPPORT/APACHE severity scores (sps, aps) and the SUPPORT model's own
+    2- and 6-month survival estimates (surv2m, surv6m).  Those are model outputs but they are
+    computed from day-3 data, i.e. available at prediction time; no single one dominates
+    (surv2m alone reaches AUC 0.84 against 0.90 for the full set).
+
+    Categorical columns are one-hot encoded here, with missing treated as its own level: that is
+    a fixed schema, not a fitted statistic, so it cannot leak.  Missing numeric values are left
+    as NaN and imputed by the preprocessing pipeline, which is fit inside each training fold.
+    """
+    import pandas as pd
+
+    if not os.path.isfile(SUPPORT2_PATH):  # one-off download, no login required
+        import urllib.request
+        os.makedirs(os.path.dirname(SUPPORT2_PATH), exist_ok=True)
+        urllib.request.urlretrieve(SUPPORT2_URL, SUPPORT2_PATH)
+
+    from sklearn.model_selection import train_test_split
+
+    df = pd.read_csv(SUPPORT2_PATH, low_memory=False)
+    y = df[SUPPORT2_TARGET].to_numpy(dtype=int)
+    df = df.drop(columns=[c for c in (*SUPPORT2_DROP, SUPPORT2_TARGET) if c in df])
+
+    num = df.select_dtypes(include=[np.number])
+    cat = df.drop(columns=num.columns)
+    dummies = pd.get_dummies(cat.astype("string").fillna("missing"), prefix_sep="=", dtype=float)
+    frame = pd.concat([num, dummies], axis=1)
+
+    X = frame.to_numpy(dtype=float)
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=test_size, stratify=y, random_state=seed)
+    # only the genuinely continuous columns can be heavy-tailed; the one-hot block is 0/1
+    heavy = [j for j in _heavy_tail_cols(X_tr) if j < num.shape[1]]
+    return Dataset("SUPPORT2", X_tr, y_tr, X_te, y_te, list(frame.columns), heavy)
+
+
+LOADERS = {"nuh": load_nuh_g2, "wdbc": load_wdbc, "support2": load_support2}
 
 
 if __name__ == "__main__":

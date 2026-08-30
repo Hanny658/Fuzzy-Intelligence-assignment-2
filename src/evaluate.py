@@ -124,5 +124,7 @@ def evaluate(factory, ds: Dataset, n_splits: int = 5, n_repeats: int = 5, seed: 
         print(f"  {ds.name:7s} {name:14s} testAUC={test_auc:.3f} testEER={test_eer:.3f} "
               f"| theta(train-OOF): FPR={op.fpr:.3f} FNR={op.fnr:.3f} acc={op.accuracy:.3f} "
               f"| CV AUC={res.cv_auc_mean:.3f}+-{res.cv_auc_std:.3f} EER={res.cv_eer_mean:.3f}+-{res.cv_eer_std:.3f} "
-              f"| fit {fit_time:.2f}s total {time.time() - t0:.1f}s {model.describe()}")
+              f"| fit {fit_time:.2f}s total {time.time() - t0:.1f}s {model.describe()}",
+              flush=True)  # worker stdout is block-buffered when redirected; without this a
+    #                       parallel run looks silent until the process exits
     return res

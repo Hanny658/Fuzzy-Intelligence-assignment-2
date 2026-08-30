@@ -85,7 +85,7 @@ class PCNet:
 
 
 class PredictiveCoding(ScoringModel):
-    name, family = "PC-2017", "local-learning"
+    name, family = "MLP-PC", "local-learning"
 
     def __init__(self, seed=0, epochs=300, eta=1e-3, gamma=0.1, T=20, batch_size=128, weight_decay=1e-3):
         super().__init__(seed)

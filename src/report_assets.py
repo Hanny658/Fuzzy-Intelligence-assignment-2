@@ -18,8 +18,8 @@ FOCUS_MODELS = [
     "SVM-RBF",
     "RandomForest",
     "MLP-BP",
-    "Forward-Forward",
-    "CMA-ES-MLP",
+    "MLP-FF",
+    "MLP-CMA-ES",
     "ANFIS",
     "TabPFN",
 ]
@@ -81,13 +81,16 @@ def sensitivity_table() -> str:
 
 def main() -> None:
     os.makedirs(FIGURES, exist_ok=True)
-    for dataset in ("nuh", "wdbc"):
-        focused = load_results(dataset)
+    focused = {}
+    for dataset in ("nuh", "wdbc", "support2"):
+        focused[dataset] = load_results(dataset)
         with open(os.path.join(RESULTS, f"{dataset}_focus_table.tex"), "w", encoding="utf-8") as stream:
-            stream.write(compact_table(focused))
-        if dataset == "nuh":
-            plots.roc_panels(focused, "NUH-g2", os.path.join(FIGURES, "nuh_roc_focused.png"))
-            plots.cv_dotplot(focused, "NUH-g2", os.path.join(FIGURES, "nuh_cv_auc_focused.png"), "auc")
+            stream.write(compact_table(focused[dataset]))
+    plots.roc_panels(focused["nuh"], "NUH-g2", os.path.join(FIGURES, "nuh_roc_focused.png"))
+    plots.roc_panels(focused["support2"], "SUPPORT2", os.path.join(FIGURES, "support2_roc_focused.png"))
+    # both data sets share one dot plot, one hue each, so each model is read across the two
+    plots.cv_dotplot_paired({"NUH-g2": focused["nuh"], "SUPPORT2": focused["support2"]},
+                            os.path.join(FIGURES, "cv_auc_nuh_support2.png"), "auc")
     with open(os.path.join(RESULTS, "nuh_borderline_table.tex"), "w", encoding="utf-8") as stream:
         stream.write(sensitivity_table())
     print("wrote focused report tables and figures")

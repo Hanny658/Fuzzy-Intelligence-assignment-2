@@ -60,7 +60,7 @@ class _EvoBase(ScoringModel):
 
 
 class CMAESMLP(_EvoBase):
-    name, family = "CMA-ES-MLP", "neuro-evolution"
+    name, family = "MLP-CMA-ES", "neuro-evolution"
 
     def __init__(self, seed=0, generations=300, sigma0=0.3, popsize=32):
         super().__init__(seed)
@@ -89,7 +89,7 @@ class CMAESMLP(_EvoBase):
 
 
 class GAMLP(_EvoBase):
-    name, family = "GA-MLP", "neuro-evolution"
+    name, family = "MLP-GA", "neuro-evolution"
 
     def __init__(self, seed=0, generations=300, popsize=60, p_cross=0.9, alpha=0.5,
                  p_mut=0.05, sigma_mut=0.1, elite=2, tournament=3):

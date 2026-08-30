@@ -85,17 +85,8 @@ def preprocess(src: str) -> str:
     # run-in paragraph headings -> bold text (pandoc would otherwise make numbered level-4 headings)
     src = re.sub(r"\\paragraph\{([^}]*)\}", BS + BS + "textbf{" + r"\1" + "} ", src)
 
-    # generated tables: inline the files and convert cell maths to text
-    def inline_input(m):
-        return table_text(open(os.path.join(REPORT, m.group(1)), encoding="utf-8").read())
-
-    src = re.sub(r"\\input\{([^}]+)\}", inline_input, src)
-    # hand-written paradigm table: collapse the two-row multicolumn header into one row
-    src = re.sub(
-        r" & \\multicolumn\{2\}\{c\}\{NUH-g2\}.*?Training rule & CV AUC & CV EER & CV AUC & CV EER & NUH & WDBC \\\\",
-        lambda m: "Training rule & NUH CV AUC & NUH CV EER & WDBC CV AUC & WDBC CV EER & Fit NUH (s) & Fit WDBC (s) " + BS + BS,
-        src, flags=re.S)
-    src = re.sub(r"\\begin\{tabular\}\{lcccccc\}.*?\\end\{tabular\}", lambda m: table_text(m.group(0)), src, flags=re.S)
+    # tables are written inline in report.tex: convert the maths inside their cells to plain text
+    src = re.sub(r"\\begin\{tabular\}.*?\\end\{tabular\}", lambda m: table_text(m.group(0)), src, flags=re.S)
     src = src.replace("$5{" + BS + "times}5$", "5×5")
 
     # layout-only commands pandoc does not need
@@ -138,10 +129,12 @@ def format_docx(path: str) -> None:
         end.set(qn("w:fldCharType"), "end")
         run._r.extend((begin, instruction, end))
 
+    # by table order in the document: NUH, borderline sensitivity, WDBC, SUPPORT2
     widths_mm = {
         0: (42, 26, 28, 35, 35),
         1: (38, 32, 40, 28, 28),
         2: (42, 26, 28, 35, 35),
+        3: (42, 26, 28, 35, 35),
     }
     for table_index, table in enumerate(doc.tables):
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -165,8 +158,6 @@ def format_docx(path: str) -> None:
         text = paragraph.text.strip()
         if text.startswith(("Table ", "Figure ")):
             paragraph.paragraph_format.keep_with_next = True
-        if text.startswith("Table 2:"):
-            paragraph.paragraph_format.page_break_before = True
         if text == "References":
             paragraph.paragraph_format.page_break_before = True
 
@@ -184,7 +175,7 @@ def main() -> None:
     try:
         pypandoc.convert_file(
             "_report_docx.tex", "docx", outputfile="report.docx",
-            extra_args=["--resource-path=.;../figures;../results", "--number-sections", "--dpi=200"],
+            extra_args=["--resource-path=.;../figures", "--number-sections", "--dpi=200"],
         )
         format_docx(DOCX)
     finally:

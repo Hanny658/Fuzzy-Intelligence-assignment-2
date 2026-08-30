@@ -52,6 +52,32 @@ class RandomForest(ScoringModel):
         return self.m.predict_proba(X)[:, 1]
 
 
+class LightGBM(ScoringModel):
+    """Gradient-boosted trees (LightGBM), as a stronger ensemble reference than the random forest.
+
+    Like the random forest this is left untuned rather than grid-searched, so that the two ensembles
+    are compared on equal terms.  The fixed settings are chosen to be safe at both extremes of our
+    data sizes: the leaf count and `min_child_samples` are small enough that the model still splits
+    on 55 NUH training cases, where the library defaults would return a constant score.
+    """
+    name, family = "LightGBM", "classical"
+
+    def fit(self, X, y):
+        from lightgbm import LGBMClassifier
+
+        self.m = LGBMClassifier(
+            n_estimators=400, learning_rate=0.05, num_leaves=15, min_child_samples=5,
+            subsample=0.9, subsample_freq=1, colsample_bytree=0.8, reg_lambda=1.0,
+            random_state=self.seed, n_jobs=1, verbosity=-1).fit(X, y)
+        return self
+
+    def decision_scores(self, X):
+        return self.m.predict_proba(X)[:, 1]
+
+    def describe(self):
+        return f"lightgbm trees={self.m.n_estimators_} leaves<=15"
+
+
 class ELM(ScoringModel):
     """Extreme learning machine: random tanh hidden layer + ridge-regression read-out (no iterative training)."""
     name, family = "ELM", "classical"
